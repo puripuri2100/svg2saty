@@ -1,0 +1,325 @@
+@require: gr
+@require: color
+@require: base/list-ext
+@require: base/base
+@require: base/option-ext
+
+type svg-position =
+  | Absolute % 絶対座標
+  | Relative % 相対座標
+
+let is-Absolute pos =
+  match pos with
+  | Absolute -> true  % 絶対座標
+  | Relative -> false % 相対座標
+
+
+type svg-float-point = float * float
+
+type svg-command =
+  | Move                 of svg-position * svg-float-point list
+  | Line                 of svg-position * svg-float-point list
+  | HorizontalLine       of svg-position * float list
+  | VerticalLine         of svg-position * float list
+  | QuadraticCurve       of svg-position * (svg-float-point * svg-float-point) list
+  | SmoothQuadraticCurve of svg-position * svg-float-point list
+  | CubicCurve           of svg-position * (svg-float-point * svg-float-point * svg-float-point) list
+  | SmoothCubicCurve     of svg-position * (svg-float-point * svg-float-point) list
+%  | EllipticalArc        of svg-position * svg-parameters % 楕円曲線命令 難しいので放置
+  | Close
+
+type svg-tag =
+  | Path of
+    color option * % fill
+    svg-command list % 
+  | Circle of
+    color option * % fill
+    float option * % cx
+    float option * % cy
+    float option   % r
+
+module SVGraphics : sig
+  val make-graphics : length -> float -> svg-tag list -> graphics list
+end = struct
+
+let-mutable now-point-ref <- (0pt, 0pt)
+let-mutable now-curve-point-ref <- (0pt,0pt)
+
+
+let make-point base-len pos (x,y) =
+  let (now-x, now-y) = !now-point-ref in
+  if is-Absolute pos then
+    % 絶対座標
+    let pt = (base-len *' x, base-len *' y) in
+    let () = now-point-ref <- pt in
+    pt
+  else
+    % 相対座標
+    let pt = (now-x +' (base-len *' x), now-y +' (base-len *' y)) in
+    let () = now-point-ref <- pt in
+    pt
+
+
+% lineto命令 パラメタは(x y)+
+let draw-Line base-len pos para pre-path =
+  let point-lst = List.map (make-point base-len pos) para in
+  let-rec sub lst pre-path =
+    match lst with
+    | [] -> pre-path
+    | x::xs -> sub xs (line-to x pre-path)
+  in
+  sub point-lst pre-path
+
+
+% 水平方向のlineto命令 パラメタはx+
+let draw-HorizontalLine base-len pos para pre-path =
+  let f x =
+    let (now-x, now-y) = !now-point-ref in
+    if is-Absolute pos then
+      % 絶対座標
+      let pt = (base-len *' x, now-y) in
+      let () = now-point-ref <- pt in
+      pt
+    else
+      % 相対座標
+      let pt = (now-x +' (base-len *' x), now-y) in
+      let () = now-point-ref <- pt in
+      pt
+  in
+  let point-lst = List.map f para in
+  let-rec sub lst pre-path =
+    match lst with
+    | [] -> pre-path
+    | x::xs -> sub xs (line-to x pre-path)
+  in
+  sub point-lst pre-path
+
+
+% 垂直方向のlineto命令 パラメタはy+
+let draw-VerticalLine base-len pos para pre-path =
+  let f y =
+    let (now-x, now-y) = !now-point-ref in
+  if is-Absolute pos then
+    % 絶対座標
+    let pt = (now-x, base-len *' y) in
+    let () = now-point-ref <- pt in
+    pt
+  else
+    % 相対座標
+    let pt = (now-x, now-y +' (base-len *' y)) in
+    let () = now-point-ref <- pt in
+    pt
+  in
+  let point-lst = List.map f para in
+  let-rec sub lst pre-path =
+    match lst with
+    | [] -> pre-path
+    | x::xs -> sub xs (line-to x pre-path)
+  in
+  sub point-lst pre-path
+
+
+% 2次ベジェ曲線命令 パラメタは(x1 y1 x y)+
+let draw-QuadraticCurve base-len pos para pre-path =
+  let point-lst = List.map
+    (fun (xy1, xy) -> (
+      let (now-x, now-y) = !now-point-ref in
+      let f (x,y) =
+        if is-Absolute pos then
+          % 絶対座標
+          let pt = (base-len *' x, base-len *' y) in
+          pt
+        else
+          % 相対座標
+          let pt = (now-x +' (base-len *' x), now-y +' (base-len *' y)) in
+          pt
+      in
+      let new-xy1 = f xy1 in
+      let new-xy = make-point base-len pos xy in
+      let () = now-curve-point-ref <- new-xy1 in
+      (new-xy1, new-xy1, new-xy)
+    ))
+    para
+  in
+  let-rec sub lst pre-path =
+    match lst with
+    | [] -> pre-path
+    | ((xy1, xy2, xy))::xs -> sub xs (bezier-to xy1 xy2 xy pre-path)
+  in
+  sub point-lst pre-path
+
+
+% 略式2次ベジェ曲線命令 パラメタは(x y)+
+let draw-SmoothQuadraticCurve base-len pos para pre-path =
+  let point-lst = List.map
+    (fun (xy) -> (
+      let (now-x, now-y) = !now-point-ref in
+      let (now-curve-x, now-curve-y) = !now-curve-point-ref in
+      let new-xy1 =
+        let x = now-x +' (now-x -' now-curve-x) in
+        let y = now-y +' (now-y -' now-curve-y) in
+        (x,y)
+      in
+      let new-xy = make-point base-len pos xy in
+      let () = now-curve-point-ref <- new-xy1 in
+      (new-xy1, new-xy1, new-xy)
+    ))
+    para
+  in
+  let-rec sub lst pre-path =
+    match lst with
+    | [] -> pre-path
+    | ((xy1, xy2, xy))::xs -> sub xs (bezier-to xy1 xy2 xy pre-path)
+  in
+  sub point-lst pre-path
+
+
+% 3次ベジェ曲線命令 パラメタは(x1 y1 x2 y2 x y)+
+let draw-CubicCurve base-len pos para pre-path =
+  let point-lst = List.map
+    (fun (xy1, xy2, xy) -> (
+      let (now-x, now-y) = !now-point-ref in
+      let f (x,y) =
+        if is-Absolute pos then
+          % 絶対座標
+          let pt = (base-len *' x, base-len *' y) in
+          pt
+        else
+          % 相対座標
+          let pt = (now-x +' (base-len *' x), now-y +' (base-len *' y)) in
+          pt
+      in
+      let new-xy1 = f xy1 in
+      let new-xy2 = f xy2 in
+      let new-xy = f xy in
+      let () = now-point-ref <- new-xy in
+      let () = now-curve-point-ref <- new-xy2 in
+      (new-xy1, new-xy2, new-xy)
+    ))
+    para
+  in
+  let-rec sub lst pre-path =
+    match lst with
+    | [] -> pre-path
+    | ((xy1, xy2, xy))::xs -> sub xs (bezier-to xy1 xy2 xy pre-path)
+  in
+  sub point-lst pre-path
+
+
+% 略式3次ベジェ曲線命令 パラメタは(x2 y2 x y)+
+let draw-SmoothCubicCurve base-len pos para pre-path =
+  let point-lst = List.map
+    (fun (xy2, xy) -> (
+      let (now-x, now-y) = !now-point-ref in
+      let (now-curve-x, now-curve-y) = !now-curve-point-ref in
+      let xy1 =
+        let x = now-x +' (now-x -' now-curve-x) in
+        let y = now-y +' (now-y -' now-curve-y) in
+        (x,y)
+      in
+      let f (x,y) =
+        if is-Absolute pos then
+          % 絶対座標
+          let pt = (base-len *' x, base-len *' y) in
+          pt
+        else
+          % 相対座標
+          let pt = (now-x +' (base-len *' x), now-y +' (base-len *' y)) in
+          pt
+      in
+      let new-xy1 = xy1 in
+      let new-xy2 = f xy2 in
+      let new-xy = f xy in
+      let () = now-point-ref <- new-xy in
+      let () = now-curve-point-ref <- new-xy2 in
+      (new-xy1, new-xy2, new-xy)
+    ))
+    para
+  in
+  let-rec sub lst pre-path =
+    match lst with
+    | [] -> pre-path
+    | ((xy1, xy2, xy))::xs -> sub xs (bezier-to xy1 xy2 xy pre-path)
+  in
+  sub point-lst pre-path
+
+
+  let make-path-lst base-len fill-opt command-list =
+    let make-pre-path com pre-path =
+      match com with
+      | Move                 (pos,para) -> pre-path % 来ないように特別な処理をしている
+      | Line                 (pos,para) -> draw-Line base-len pos para pre-path
+      | HorizontalLine       (pos,para) -> draw-HorizontalLine base-len pos para pre-path
+      | VerticalLine         (pos,para) -> draw-VerticalLine base-len pos para pre-path
+      | QuadraticCurve       (pos,para) -> draw-QuadraticCurve base-len pos para pre-path
+      | SmoothQuadraticCurve (pos,para) -> draw-SmoothQuadraticCurve base-len pos para pre-path
+      | CubicCurve           (pos,para) -> draw-CubicCurve base-len pos para pre-path
+      | SmoothCubicCurve     (pos,para) -> draw-SmoothCubicCurve base-len pos para pre-path
+%      | EllipticalArc        (pos,para) -> pre-path
+      | Close                           -> pre-path % 来ないように特別な処理をしている
+    in
+    let path-lst =
+      let-rec make-path lst pre-path =
+        match lst with
+        | [] -> [close-with-line pre-path]
+        | x :: [] -> [close-with-line (make-pre-path x pre-path)]
+        | x :: y :: zs -> (
+          match (x,y) with
+          | (_,Move(pos,para)) -> (
+            let fst-path = close-with-line pre-path in
+            fst-path ::
+              (make-path zs (start-path
+                (let _ = List.map (make-point base-len pos) para in !now-point-ref)
+              ))
+          )
+          | (Close,_) -> panic `err`
+          | _ -> make-path (y::zs) (make-pre-path x pre-path)
+        )
+      in
+      match command-list with
+      | [] -> []
+      | x::[] -> []
+      | x :: xs -> (
+        match x with
+        | Move(pos,para) -> (
+          make-path xs (start-path
+            (let _ = List.map (make-point base-len pos) para in !now-point-ref)
+          )
+        )
+        | _ -> []
+      )
+    in
+    match (path-lst,fill-opt) with
+    | (lst,Some(c)) -> List.map (fill c) lst
+    | (lst,None)    -> List.map (fill Color.white) lst
+
+
+
+
+  let make-circle-lst base-len fill-opt cx-opt cy-opt r-opt =
+    let path-opt =
+      match (cx-opt, cy-opt, r-opt) with
+      | (Some(cx), Some(cy), Some(r)) -> Some(Gr.circle (base-len *' cx, base-len *' cy) (base-len *' r))
+      | _ -> None
+    in
+    match (path-opt,fill-opt) with
+    | (Some(p),Some(c)) -> [fill c p]
+    | (Some(p),None)    -> [fill Color.white p]
+    | _ -> []
+
+
+
+  let make-graphics base-len y-len lst =
+    let gr-lst t =
+     match t with
+      | Path (fill-opt, command-list) -> make-path-lst base-len fill-opt command-list
+      | Circle (fill-opt, cx-opt, cy-opt, r-opt) -> make-circle-lst base-len fill-opt cx-opt cy-opt r-opt
+    in
+    let () = display-message (List.length lst |> arabic) in
+    lst
+    |> List.map gr-lst
+    |> List.concat
+    |> List.map (shift-graphics (0pt,base-len *' y-len))
+
+end
+
