@@ -1,8 +1,8 @@
 @require: gr
 @require: color
-@require: base/list-ext
-@require: base/base
-@require: base/option-ext
+@require: list
+@require: option
+@require: base/float
 
 type svg-position =
   | Absolute % 絶対座標
@@ -38,7 +38,7 @@ type svg-tag =
     float option * % cy
     float option   % r
 
-module SVGraphics : sig
+module SVG2saty : sig
   val make-graphics : length -> float -> svg-tag list -> graphics list
 end = struct
 
