@@ -51,6 +51,7 @@ type path-type =
 
 
 let-mutable now-point-ref <- (0pt, 0pt)
+let-mutable start-point-ref <- (0pt,0pt)
 let-mutable now-curve-point-ref <- None
 
 
@@ -143,15 +144,14 @@ let draw-SmoothQuadraticCurve base-len pos para =
   let path-type-lst = List.map
     (fun (xy) -> (
       let (now-x, now-y) = !now-point-ref in
-      let (now-curve-x, now-curve-y) =
-        match !now-curve-point-ref with
-        | Some(x,y) -> (x,y)
-        | None -> (now-x, now-y)
-      in
       let new-xy1 =
-        let x = now-x +' (now-x -' now-curve-x) in
-        let y = now-y +' (now-y -' now-curve-y) in
-        (x,y)
+        match !now-curve-point-ref with
+        | Some(now-curve-x,now-curve-y) -> (
+          let x = now-x +' (now-x -' now-curve-x) in
+          let y = now-y +' (now-y -' now-curve-y) in
+          (x,y)
+        )
+        | None -> (now-x, now-y)
       in
       let new-xy = make-point base-len pos xy in
       let () = now-curve-point-ref <- Some(new-xy1) in
@@ -194,15 +194,14 @@ let draw-SmoothCubicCurve base-len pos para =
   let path-type-lst = List.map
     (fun (xy2, xy) -> (
       let (now-x, now-y) = !now-point-ref in
-      let (now-curve-x, now-curve-y) =
+      let new-xy1 =
         match !now-curve-point-ref with
-        | Some(x,y) -> (x,y)
+        | Some(now-curve-x,now-curve-y) -> (
+          let x = now-x +' (now-x -' now-curve-x) in
+          let y = now-y +' (now-y -' now-curve-y) in
+          (x,y)
+        )
         | None -> (now-x, now-y)
-      in
-      let xy1 =
-        let x = now-x +' (now-x -' now-curve-x) in
-        let y = now-y +' (now-y -' now-curve-y) in
-        (x,y)
       in
       let f (x,y) =
         if is-Absolute pos then
@@ -214,7 +213,6 @@ let draw-SmoothCubicCurve base-len pos para =
           let pt = (now-x +' (base-len *' x), now-y +' (base-len *' y)) in
           pt
       in
-      let new-xy1 = xy1 in
       let new-xy2 = f xy2 in
       let new-xy = f xy in
       let () = now-point-ref <- new-xy in
@@ -231,6 +229,8 @@ let draw-SmoothCubicCurve base-len pos para =
       match com with
       | Move                 (pos,para) -> (
         let _ = List.map (make-point base-len pos) para in
+        let () = start-point-ref <- !now-point-ref in
+        let () = now-curve-point-ref <- None in
         [PathStart(!now-point-ref)]
       )
       | Line                 (pos,para) -> draw-Line                 base-len pos para
@@ -252,28 +252,43 @@ let draw-SmoothCubicCurve base-len pos para =
       match path-type-lst with
       | [] -> path-lst
       | (PathBezier(xy1,xy2,xy))::[] -> (
-        (close-with-bezier xy1 xy2 pre-path) :: path-lst
+        (bezier-to xy1 xy2 xy pre-path |> close-with-line) :: path-lst
       )
       | (PathLine(xy))::[] -> (
         (line-to xy pre-path |> close-with-line) :: path-lst
       )
       | (PathBezier(xy1,xy2,xy))::(PathClose)::(PathStart(new-xy))::xs -> (
         let new-path-lst = (bezier-to xy1 xy2 xy pre-path |> close-with-line) :: path-lst in
+        let () = now-curve-point-ref <- None in
         make-path xs new-path-lst (start-path new-xy)
       )
       | (PathClose)::(PathStart(new-xy))::xs -> (
         let new-path-lst = (close-with-line pre-path) :: path-lst in
+        let () = start-point-ref <- new-xy in
+        let () = now-curve-point-ref <- None in
         make-path xs new-path-lst (start-path new-xy)
+      )
+      | (PathClose)::x::xs -> (
+        let new-path-lst = (close-with-line pre-path) :: path-lst in
+        let () = now-curve-point-ref <- None in
+        let () = now-point-ref <- !start-point-ref in
+        make-path (x::xs) new-path-lst (start-path !now-point-ref)
       )
       | (PathClose)::[] -> (close-with-line pre-path) :: path-lst
       | (PathBezier(xy1,xy2,xy)) :: xs -> make-path xs path-lst (bezier-to xy1 xy2 xy pre-path)
-      | (PathLine(xy)) :: xs -> make-path xs path-lst (line-to xy pre-path)
+      | (PathLine(xy)) :: xs -> (
+        let () = now-curve-point-ref <- None in
+        make-path xs path-lst (line-to xy pre-path)
+      )
       | _ -> path-lst
     in
     let path-lst =
       match path-type-lst with
       | [] -> []
-      | (PathStart(xy))::xs -> make-path xs [] (start-path xy)
+      | (PathStart(xy))::xs -> (
+        let () = now-curve-point-ref <- None in
+        make-path xs [] (start-path xy)
+      )
       | _ -> []
     in
     match fill-opt with
