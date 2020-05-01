@@ -248,46 +248,46 @@ let draw-SmoothCubicCurve base-len pos para =
       |> List.map make-path-type-lst
       |> List.concat
     in
-    let-rec make-path path-type-lst path-lst pre-path =
+    let-rec make-path path-type-lst path pre-path =
       match path-type-lst with
-      | [] -> path-lst
+      | [] -> path
       | (PathBezier(xy1,xy2,xy))::[] -> (
-        (bezier-to xy1 xy2 xy pre-path |> close-with-line) :: path-lst
+        unite-path (bezier-to xy1 xy2 xy pre-path |> close-with-line) path
       )
       | (PathLine(xy))::[] -> (
-        (line-to xy pre-path |> close-with-line) :: path-lst
+        unite-path (line-to xy pre-path |> close-with-line)  path
       )
       | (PathBezier(xy1,xy2,xy))::(PathClose)::(PathStart(new-xy))::xs -> (
-        let new-path-lst = (bezier-to xy1 xy2 xy pre-path |> close-with-line) :: path-lst in
+        let new-path-lst = unite-path (bezier-to xy1 xy2 xy pre-path |> close-with-line) path in
         let () = now-curve-point-ref <- None in
         make-path xs new-path-lst (start-path new-xy)
       )
       | (PathClose)::(PathStart(new-xy))::xs -> (
-        let new-path-lst = (close-with-line pre-path) :: path-lst in
+        let new-path-lst = unite-path (close-with-line pre-path) path in
         let () = start-point-ref <- new-xy in
         let () = now-curve-point-ref <- None in
         make-path xs new-path-lst (start-path new-xy)
       )
       | (PathClose)::x::xs -> (
-        let new-path-lst = (close-with-line pre-path) :: path-lst in
+        let new-path-lst = unite-path (close-with-line pre-path) path in
         let () = now-curve-point-ref <- None in
         let () = now-point-ref <- !start-point-ref in
         make-path (x::xs) new-path-lst (start-path !now-point-ref)
       )
-      | (PathClose)::[] -> (close-with-line pre-path) :: path-lst
-      | (PathBezier(xy1,xy2,xy)) :: xs -> make-path xs path-lst (bezier-to xy1 xy2 xy pre-path)
+      | (PathClose)::[] -> unite-path (close-with-line pre-path) path
+      | (PathBezier(xy1,xy2,xy)) :: xs -> make-path xs path (bezier-to xy1 xy2 xy pre-path)
       | (PathLine(xy)) :: xs -> (
         let () = now-curve-point-ref <- None in
-        make-path xs path-lst (line-to xy pre-path)
+        make-path xs path (line-to xy pre-path)
       )
-      | _ -> path-lst
+      | _ -> path
     in
     let path-lst =
       match path-type-lst with
       | [] -> []
       | (PathStart(xy))::xs -> (
         let () = now-curve-point-ref <- None in
-        make-path xs [] (start-path xy)
+        [make-path xs (xy |> start-path |> close-with-line) (start-path xy)]
       )
       | _ -> []
     in
